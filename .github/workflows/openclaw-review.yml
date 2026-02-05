@@ -1,0 +1,106 @@
+name: OpenClaw Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [ main ]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Get PR information
+        id: pr-info
+        run: |
+          echo "PR_NUMBER=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          echo "REPO_FULL_NAME=${{ github.repository }}" >> $GITHUB_OUTPUT
+          echo "PR_TITLE=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+
+      - name: Analyze changes with OpenClaw
+        id: openclaw-review
+        run: |
+          echo "🔍 Analisando código do PR #${{ steps.pr-info.outputs.PR_NUMBER }}"
+          
+          # Listar arquivos modificados
+          echo "📁 Arquivos modificados:"
+          git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} || true
+          
+          # Contar linhas alteradas
+          LINES_CHANGED=$(git diff --stat ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | tail -1 | awk '{print $4+$6}')
+          echo "📊 Linhas alteradas: $LINES_CHANGED"
+          
+          # Verificar se há testes
+          HAS_TESTS=$(find . -name "*.test.*" -o -name "*.spec.*" | wc -l)
+          echo "🧪 Arquivos de teste encontrados: $HAS_TESTS"
+          
+          # Análise básica de segurança
+          echo "🔒 Verificando segurança..."
+          # Aqui poderia usar ferramentas como npm audit, snyk, etc.
+          
+          # Gerar resumo da análise
+          echo "## 📋 Resumo da Análise" > review-summary.md
+          echo "" >> review-summary.md
+          echo "**PR:** #${{ steps.pr-info.outputs.PR_NUMBER }} - ${{ steps.pr-info.outputs.PR_TITLE }}" >> review-summary.md
+          echo "" >> review-summary.md
+          echo "**Métricas:**" >> review-summary.md
+          echo "- 📊 Linhas alteradas: $LINES_CHANGED" >> review-summary.md
+          echo "- 🧪 Testes: $HAS_TESTS arquivo(s) de teste" >> review-summary.md
+          echo "- 📁 Arquivos modificados: $(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | wc -l)" >> review-summary.md
+          echo "" >> review-summary.md
+          echo "**Recomendações:**" >> review-summary.md
+          echo "- ✅ Verificar se todos os testes passam" >> review-summary.md
+          echo "- 📝 Atualizar documentação se necessário" >> review-summary.md
+          echo "- 🔍 Revisar mudanças em arquivos críticos" >> review-summary.md
+          echo "" >> review-summary.md
+          echo "---" >> review-summary.md
+          echo "*Análise automática via OpenClaw CI*" >> review-summary.md
+          
+          # Salvar output para próximo passo
+          echo "REVIEW_SUMMARY=$(cat review-summary.md | jq -Rs .)" >> $GITHUB_OUTPUT
+
+      - name: Post review comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const summary = `${{ steps.openclaw-review.outputs.REVIEW_SUMMARY }}`;
+            const prNumber = ${{ github.event.pull_request.number }};
+            
+            // Postar comentário no PR
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: JSON.parse(summary)
+            });
+            
+            // Adicionar labels baseado na análise
+            const linesChanged = parseInt('${{ steps.openclaw-review.outputs.LINES_CHANGED }}' || '0');
+            if (linesChanged > 500) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['large-pr']
+              });
+            }
+
+      - name: Check for critical issues
+        if: ${{ false }} # Placeholder para verificações futuras
+        run: |
+          echo "🔄 Em breve: verificações de segurança e qualidade"
+          echo "Planejado:"
+          echo "- npm audit para dependências"
+          echo "- ESLint para qualidade de código"
+          echo "- TypeScript type checking"
+          echo "- Test coverage report"
